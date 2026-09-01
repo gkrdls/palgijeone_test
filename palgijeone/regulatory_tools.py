@@ -1,0 +1,219 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Iterable
+
+from .schemas import (
+    Determination,
+    LegalSource,
+    Product,
+    RegulatoryFinding,
+    RiskLevel,
+    ToolName,
+    ToolResult,
+    ToolStatus,
+)
+from .selector import SelectionDecision
+
+
+def mock_source(name: str, law: str, article: str | None = None) -> LegalSource:
+    return LegalSource(
+        source_name=name,
+        law_name=law,
+        article=article,
+        quoted_text="프로토타입 흐름 검증용 가상 근거입니다. 실제 API 응답으로 교체해야 합니다.",
+        source_url="https://example.com/mock-legal-source",
+        is_mock=True,
+    )
+
+
+class RegulatoryTool(ABC):
+    name: ToolName
+
+    def execute(self, product: Product, decision: SelectionDecision) -> ToolResult:
+        if not decision.selected:
+            return ToolResult(
+                tool_name=self.name,
+                status=ToolStatus.NOT_APPLICABLE,
+                selected=False,
+                selection_reason=decision.reason,
+                query={"product_id": product.product_id},
+                raw_response={"mock": True, "skipped": True},
+            )
+        return self.run(product, decision)
+
+    @abstractmethod
+    def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
+        raise NotImplementedError
+
+    def result(
+        self,
+        product: Product,
+        decision: SelectionDecision,
+        findings: Iterable[RegulatoryFinding],
+        actions: list[str] | None = None,
+        missing: list[str] | None = None,
+    ) -> ToolResult:
+        return ToolResult(
+            tool_name=self.name,
+            status=ToolStatus.PARTIAL if missing else ToolStatus.SUCCESS,
+            selected=True,
+            selection_reason=decision.reason,
+            query={"product_id": product.product_id, "category": product.category},
+            findings=list(findings),
+            required_actions=actions or [],
+            missing_information=missing or [],
+            raw_response={"mock": True, "adapter": self.__class__.__name__},
+        )
+
+
+class CustomsRequirementsTool(RegulatoryTool):
+    name = ToolName.CUSTOMS
+
+    def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
+        missing = [] if product.category else ["통관 품목 분류를 위한 상품 카테고리"]
+        determination = Determination.INSUFFICIENT_INFORMATION if missing else Determination.POSSIBLY_REQUIRED
+        finding = RegulatoryFinding(
+            tool_name=self.name,
+            subject="수입 통관 및 세관장 확인 요건",
+            determination=determination,
+            risk_level=RiskLevel.UNKNOWN if missing else RiskLevel.MEDIUM,
+            summary="품목분류 및 세관장 확인대상 여부 확인이 필요합니다.",
+            rationale="해외 사입 상품은 상품 특성과 HS 코드 후보에 따라 통관 요건이 달라집니다.",
+            product_facts_used=[value for value in (product.product_name, product.category) if value],
+            requirements=["HS 코드 후보 확인", "세관장 확인대상 여부 조회"],
+            legal_sources=[mock_source("관세청", "관세법 및 세관장확인고시")],
+            confidence=0.55 if missing else 0.78,
+        )
+        return self.result(product, decision, [finding], ["관세청 API로 HS 코드와 통관 요건 확인"], missing)
+
+
+class RadioComplianceTool(RegulatoryTool):
+    name = ToolName.RADIO
+
+    def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
+        finding = RegulatoryFinding(
+            tool_name=self.name,
+            subject="방송통신기자재 적합성평가",
+            determination=Determination.POSSIBLY_REQUIRED,
+            risk_level=RiskLevel.HIGH,
+            summary="무선 기능이 확인되어 적합성평가 대상 여부를 확인해야 합니다.",
+            rationale="상품 정보에서 무선 또는 주파수 사용 신호가 발견되었습니다.",
+            product_facts_used=["wireless=true", *[f"{a.name}={a.value}" for a in product.attributes]],
+            requirements=["무선 사양 확인", "적합등록·적합인증 대상 여부 조회"],
+            legal_sources=[mock_source("국립전파연구원", "전파법", "적합성평가 관련 조항")],
+            confidence=0.88,
+        )
+        return self.result(product, decision, [finding], ["정확한 모델명과 무선 모듈 사양 확보"])
+
+
+class FoodDrugSafetyTool(RegulatoryTool):
+    name = ToolName.FOOD_DRUG
+
+    def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
+        if product.medical_claim:
+            subject, summary, risk = "의료기기 오인·표방", "치료 효능 문구에 대한 의료기기 해당성 검토가 필요합니다.", RiskLevel.HIGH
+        elif product.cosmetic_claim:
+            subject, summary, risk = "화장품 및 효능 표현", "화장품 유형·성분·효능 표현 검토가 필요합니다.", RiskLevel.HIGH
+        else:
+            subject, summary, risk = "식품용 기구·용기", "식품 접촉 재질의 기준·규격 검토가 필요합니다.", RiskLevel.MEDIUM
+        finding = RegulatoryFinding(
+            tool_name=self.name,
+            subject=subject,
+            determination=Determination.POSSIBLY_REQUIRED,
+            risk_level=risk,
+            summary=summary,
+            rationale="상품 파싱 결과에서 식약처 소관 가능성이 있는 신호가 발견되었습니다.",
+            product_facts_used=[
+                f"food_contact={product.food_contact}",
+                f"medical_claim={product.medical_claim}",
+                f"cosmetic_claim={product.cosmetic_claim}",
+            ],
+            requirements=["제품 유형 및 원료·재질 확인", "식약처 규제정보 API 조회"],
+            legal_sources=[mock_source("식품의약품안전처", "식품위생법·화장품법·의료기기법")],
+            confidence=0.82,
+        )
+        return self.result(product, decision, [finding], ["식약처 API에서 제품 유형별 요건 확인"])
+
+
+class ElectricalSafetyTool(RegulatoryTool):
+    name = ToolName.ELECTRICAL
+
+    def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
+        finding = RegulatoryFinding(
+            tool_name=self.name,
+            subject="전기용품 및 생활용품 안전관리",
+            determination=Determination.POSSIBLY_REQUIRED,
+            risk_level=RiskLevel.HIGH,
+            summary="전원 또는 배터리 사용 상품으로 전안법상 안전관리 대상 여부 확인이 필요합니다.",
+            rationale="electrical_powered 또는 battery_included 값이 참입니다.",
+            product_facts_used=[
+                f"electrical_powered={product.electrical_powered}",
+                f"battery_included={product.battery_included}",
+            ],
+            requirements=["정격·전원 방식 확인", "안전인증·안전확인·공급자적합성 대상 구분"],
+            legal_sources=[mock_source("국가기술표준원", "전기용품 및 생활용품 안전관리법")],
+            confidence=0.84,
+        )
+        return self.result(product, decision, [finding], ["제품 정격 및 배터리 사양 확보"])
+
+
+class ChildrenProductSafetyTool(RegulatoryTool):
+    name = ToolName.CHILDREN
+
+    def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
+        age = product.target_age or "연령 정보 없음"
+        ambiguous = product.target_age is None or "14" in age
+        determination = Determination.INSUFFICIENT_INFORMATION if ambiguous else Determination.POSSIBLY_REQUIRED
+        missing = ["표시 연령과 실제 사용 목적의 관계"] if ambiguous else []
+        finding = RegulatoryFinding(
+            tool_name=self.name,
+            subject="어린이제품 안전관리",
+            determination=determination,
+            risk_level=RiskLevel.UNKNOWN if ambiguous else RiskLevel.HIGH,
+            summary="대상 연령 표현만으로 적용 여부를 확정하지 않고 실제 사용 목적을 함께 확인해야 합니다.",
+            rationale=f"상품의 대상 연령 원문은 '{age}'입니다.",
+            product_facts_used=[f"target_age={age}", f"category={product.category}"],
+            requirements=["대상 연령 원문 보존", "어린이제품·완구 해당성 확인"],
+            legal_sources=[mock_source("국가기술표준원", "어린이제품 안전 특별법")],
+            confidence=0.58 if ambiguous else 0.8,
+        )
+        return self.result(product, decision, [finding], ["연령 표시와 실제 용도 교차 확인"], missing)
+
+
+class LabelAdvertisingDetectionTool(RegulatoryTool):
+    name = ToolName.LABEL_AD
+    RISKY_TERMS = ("완전 제거", "치료", "최저가", "100%", "완벽")
+
+    def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
+        matched = [text for text in product.listing_text if any(term in text for term in self.RISKY_TERMS)]
+        determination = Determination.POSSIBLY_REQUIRED if matched else Determination.NOT_REQUIRED
+        risk = RiskLevel.HIGH if any("치료" in item or "완전 제거" in item for item in matched) else (
+            RiskLevel.MEDIUM if matched else RiskLevel.LOW
+        )
+        finding = RegulatoryFinding(
+            tool_name=self.name,
+            subject="표시·광고 문구 위험 탐지",
+            determination=determination,
+            risk_level=risk,
+            summary=f"검토가 필요한 문구 {len(matched)}건을 탐지했습니다." if matched else "규칙 기반 위험 문구가 탐지되지 않았습니다.",
+            rationale="과장·절대적 표현 및 치료 효능 표현을 규칙 기반으로 탐지했습니다.",
+            product_facts_used=matched,
+            requirements=["문구의 객관적 입증자료 확인"] if matched else [],
+            legal_sources=[mock_source("공정거래위원회", "표시·광고의 공정화에 관한 법률")],
+            confidence=0.86,
+        )
+        return self.result(product, decision, [finding], ["위험 문구 수정 또는 입증자료 확보"] if matched else [])
+
+
+def build_default_tools() -> dict[ToolName, RegulatoryTool]:
+    tools: list[RegulatoryTool] = [
+        CustomsRequirementsTool(),
+        RadioComplianceTool(),
+        FoodDrugSafetyTool(),
+        ElectricalSafetyTool(),
+        ChildrenProductSafetyTool(),
+        LabelAdvertisingDetectionTool(),
+    ]
+    return {tool.name: tool for tool in tools}
+
