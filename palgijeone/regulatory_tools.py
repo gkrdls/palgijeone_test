@@ -4,11 +4,19 @@ from abc import ABC, abstractmethod
 from typing import Iterable
 
 from .schemas import (
+    AdvertisingAssessment,
+    AdvertisingPhrase,
+    ChildrenAssessment,
+    CustomsAssessment,
     Determination,
+    ElectricalAssessment,
+    FoodDrugAssessment,
     LegalSource,
     Product,
+    RadioAssessment,
     RegulatoryFinding,
     RiskLevel,
+    ToolAssessment,
     ToolName,
     ToolResult,
     ToolStatus,
@@ -50,6 +58,7 @@ class RegulatoryTool(ABC):
         self,
         product: Product,
         decision: SelectionDecision,
+        payload: ToolAssessment,
         findings: Iterable[RegulatoryFinding],
         actions: list[str] | None = None,
         missing: list[str] | None = None,
@@ -60,6 +69,7 @@ class RegulatoryTool(ABC):
             selected=True,
             selection_reason=decision.reason,
             query={"product_id": product.product_id, "category": product.category},
+            result=payload,
             findings=list(findings),
             required_actions=actions or [],
             missing_information=missing or [],
@@ -85,7 +95,21 @@ class CustomsRequirementsTool(RegulatoryTool):
             legal_sources=[mock_source("관세청", "관세법 및 세관장확인고시")],
             confidence=0.55 if missing else 0.78,
         )
-        return self.result(product, decision, [finding], ["관세청 API로 HS 코드와 통관 요건 확인"], missing)
+        payload = CustomsAssessment(
+            hs_code_candidates=[] if missing else ["분류 필요(예시 후보)"],
+            customs_confirmation_required=None,
+            applicable_requirements=["HS 코드 확정 후 세관장 확인대상 여부 조회"],
+            required_documents=["제품 사양서", "거래명세 또는 인보이스"],
+            legal_sources=finding.legal_sources,
+        )
+        return self.result(
+            product,
+            decision,
+            payload,
+            [finding],
+            ["관세청 API로 HS 코드와 통관 요건 확인"],
+            missing,
+        )
 
 
 class RadioComplianceTool(RegulatoryTool):
@@ -104,7 +128,21 @@ class RadioComplianceTool(RegulatoryTool):
             legal_sources=[mock_source("국립전파연구원", "전파법", "적합성평가 관련 조항")],
             confidence=0.88,
         )
-        return self.result(product, decision, [finding], ["정확한 모델명과 무선 모듈 사양 확보"])
+        frequencies = [a.value for a in product.attributes if "주파수" in a.name]
+        payload = RadioAssessment(
+            wireless_features=[a.value for a in product.attributes if a.name in {"통신", "주파수"}],
+            frequency_bands=frequencies,
+            conformity_assessment_required=None,
+            certification_type=None,
+            legal_sources=finding.legal_sources,
+        )
+        return self.result(
+            product,
+            decision,
+            payload,
+            [finding],
+            ["정확한 모델명과 무선 모듈 사양 확보"],
+        )
 
 
 class FoodDrugSafetyTool(RegulatoryTool):
@@ -133,7 +171,32 @@ class FoodDrugSafetyTool(RegulatoryTool):
             legal_sources=[mock_source("식품의약품안전처", "식품위생법·화장품법·의료기기법")],
             confidence=0.82,
         )
-        return self.result(product, decision, [finding], ["식약처 API에서 제품 유형별 요건 확인"])
+        categories = []
+        if product.food_contact:
+            categories.append("food_contact")
+        if product.medical_claim:
+            categories.append("medical_claim")
+        if product.cosmetic_claim:
+            categories.append("cosmetic")
+        payload = FoodDrugAssessment(
+            regulatory_categories=categories,
+            regulated=None,
+            detected_claims=product.listing_text if product.medical_claim or product.cosmetic_claim else [],
+            ingredients_or_materials=[
+                attribute.value
+                for attribute in product.attributes
+                if attribute.name in {"성분", "원료", "재질", "소재"}
+            ],
+            applicable_requirements=["제품 유형 확정 후 식약처 기준 조회"],
+            legal_sources=finding.legal_sources,
+        )
+        return self.result(
+            product,
+            decision,
+            payload,
+            [finding],
+            ["식약처 API에서 제품 유형별 요건 확인"],
+        )
 
 
 class ElectricalSafetyTool(RegulatoryTool):
@@ -155,7 +218,29 @@ class ElectricalSafetyTool(RegulatoryTool):
             legal_sources=[mock_source("국가기술표준원", "전기용품 및 생활용품 안전관리법")],
             confidence=0.84,
         )
-        return self.result(product, decision, [finding], ["제품 정격 및 배터리 사양 확보"])
+        power_sources = []
+        if product.electrical_powered:
+            power_sources.append("electrical_power")
+        if product.battery_included:
+            power_sources.append("battery_included")
+        payload = ElectricalAssessment(
+            power_sources=power_sources,
+            rated_specifications=[
+                attribute.value
+                for attribute in product.attributes
+                if attribute.name in {"정격", "전압", "전류", "배터리"}
+            ],
+            safety_management_required=None,
+            certification_type=None,
+            legal_sources=finding.legal_sources,
+        )
+        return self.result(
+            product,
+            decision,
+            payload,
+            [finding],
+            ["제품 정격 및 배터리 사양 확보"],
+        )
 
 
 class ChildrenProductSafetyTool(RegulatoryTool):
@@ -178,7 +263,22 @@ class ChildrenProductSafetyTool(RegulatoryTool):
             legal_sources=[mock_source("국가기술표준원", "어린이제품 안전 특별법")],
             confidence=0.58 if ambiguous else 0.8,
         )
-        return self.result(product, decision, [finding], ["연령 표시와 실제 용도 교차 확인"], missing)
+        payload = ChildrenAssessment(
+            target_age_raw=product.target_age,
+            intended_for_children=None if ambiguous else True,
+            product_type=product.category,
+            safety_management_required=None,
+            certification_type=None,
+            legal_sources=finding.legal_sources,
+        )
+        return self.result(
+            product,
+            decision,
+            payload,
+            [finding],
+            ["연령 표시와 실제 용도 교차 확인"],
+            missing,
+        )
 
 
 class LabelAdvertisingDetectionTool(RegulatoryTool):
@@ -203,7 +303,33 @@ class LabelAdvertisingDetectionTool(RegulatoryTool):
             legal_sources=[mock_source("공정거래위원회", "표시·광고의 공정화에 관한 법률")],
             confidence=0.86,
         )
-        return self.result(product, decision, [finding], ["위험 문구 수정 또는 입증자료 확보"] if matched else [])
+        phrases = [
+            AdvertisingPhrase(
+                text=text,
+                risk_type="medical_or_absolute_claim"
+                if "치료" in text or "완전 제거" in text
+                else "absolute_or_comparative_claim",
+                risk_level=RiskLevel.HIGH
+                if "치료" in text or "완전 제거" in text
+                else RiskLevel.MEDIUM,
+                reason="치료 효능 또는 객관적 입증이 필요한 절대·비교 표현이 포함되었습니다.",
+                evidence_required=True,
+            )
+            for text in matched
+        ]
+        payload = AdvertisingAssessment(
+            reviewed_phrases=product.listing_text,
+            detected_phrases=phrases,
+            overall_risk=risk,
+            legal_sources=finding.legal_sources,
+        )
+        return self.result(
+            product,
+            decision,
+            payload,
+            [finding],
+            ["위험 문구 수정 또는 입증자료 확보"] if matched else [],
+        )
 
 
 def build_default_tools() -> dict[ToolName, RegulatoryTool]:
@@ -216,4 +342,3 @@ def build_default_tools() -> dict[ToolName, RegulatoryTool]:
         LabelAdvertisingDetectionTool(),
     ]
     return {tool.name: tool for tool in tools}
-

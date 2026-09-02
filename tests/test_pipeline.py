@@ -9,7 +9,18 @@ from palgijeone.llm_agents import (
 )
 from palgijeone.pipeline import CompliancePipeline
 from palgijeone.sample_products import SAMPLE_PRODUCTS, get_sample_product
-from palgijeone.schemas import FinalVerificationStatus, ToolName, ToolStatus, VerificationStatus
+from palgijeone.schemas import (
+    AdvertisingAssessment,
+    ChildrenAssessment,
+    CustomsAssessment,
+    ElectricalAssessment,
+    FinalVerificationStatus,
+    FoodDrugAssessment,
+    RadioAssessment,
+    ToolName,
+    ToolStatus,
+    VerificationStatus,
+)
 from palgijeone.selector import ToolSelector
 
 
@@ -60,6 +71,34 @@ class CompliancePipelineTest(unittest.TestCase):
         self.assertEqual(completed[ToolName.ELECTRICAL.value], ToolStatus.SUCCESS.value)
         self.assertEqual(completed[ToolName.CHILDREN.value], ToolStatus.PARTIAL.value)
         self.assertEqual(completed[ToolName.FOOD_DRUG.value], ToolStatus.NOT_APPLICABLE.value)
+
+    def test_each_selected_tool_returns_its_typed_assessment(self) -> None:
+        expected_types = {
+            ToolName.CUSTOMS: CustomsAssessment,
+            ToolName.RADIO: RadioAssessment,
+            ToolName.FOOD_DRUG: FoodDrugAssessment,
+            ToolName.ELECTRICAL: ElectricalAssessment,
+            ToolName.CHILDREN: ChildrenAssessment,
+            ToolName.LABEL_AD: AdvertisingAssessment,
+        }
+
+        results_by_tool = {}
+        for product in SAMPLE_PRODUCTS.values():
+            result = self.pipeline.run(product)
+            self.assertEqual(len(result.tool_results), 6)
+            for tool_result in result.tool_results:
+                if tool_result.selected:
+                    results_by_tool.setdefault(tool_result.tool_name, tool_result)
+                    self.assertIsInstance(tool_result.result, expected_types[tool_result.tool_name])
+                else:
+                    self.assertIsNone(tool_result.result)
+
+        self.assertEqual(set(results_by_tool), set(ToolName))
+
+    def test_final_schema_version_is_v0_2(self) -> None:
+        result = self.pipeline.run(get_sample_product("adult_tshirt"))
+        self.assertEqual(result.schema_version, "0.2.0")
+        self.assertEqual(len(result.tool_results), 6)
 
     def test_adult_tshirt_skips_unrelated_tools(self) -> None:
         result = self.pipeline.run(get_sample_product("adult_tshirt"))

@@ -17,6 +17,16 @@
   -> 최종 결과(FinalAssessment)
 ```
 
+## 스키마 버전
+
+- `v0.1-flow` 태그: 모든 툴이 공통 `ToolResult`와 `RegulatoryFinding`만 반환하는 기준 버전
+- `feat/typed-tool-results` 브랜치: 공통 결과 안에 6개 툴별 전용 `result` 스키마를 추가한 v0.2
+- `examples/v0_1_generic_result.json`, `examples/v0_2_typed_tool_result.json`: 두 형식의 비교 예시
+
+v0.2에서도 공통 `findings`는 유지합니다. `result`는 툴별 구조화 결과, `findings`는
+종합·검증 단계에서 공통으로 사용하는 판단, `raw_response`는 외부 API 원본 응답입니다.
+최종 `FinalAssessment`에도 6개의 `tool_results`를 보존해 판단 근거를 역추적할 수 있습니다.
+
 ## 실행
 
 Python 3.11 이상을 권장합니다.

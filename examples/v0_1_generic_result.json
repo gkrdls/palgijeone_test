@@ -1,0 +1,19 @@
+{
+  "schema_version": "0.1.0",
+  "tool_result": {
+    "tool_name": "radio_compliance",
+    "status": "success",
+    "selected": true,
+    "selection_reason": "상품에 2.4GHz 무선 기능이 있음",
+    "findings": [
+      {
+        "subject": "방송통신기자재 적합성평가",
+        "determination": "possibly_required",
+        "risk_level": "high"
+      }
+    ],
+    "raw_response": {
+      "mock": true
+    }
+  }
+}

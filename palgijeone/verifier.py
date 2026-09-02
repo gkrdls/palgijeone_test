@@ -144,10 +144,11 @@ class VerificationAgent:
             verification_status=final_status,
             overall_status=draft.overall_status,
             summary=draft.summary,
+            selected_tools=draft.selected_tools,
+            tool_results=draft.tool_results,
             findings=draft.findings,
             required_actions=draft.required_actions,
             missing_information=draft.missing_information,
             follow_up_questions=verification.follow_up_questions,
             verification=verification,
         )
-

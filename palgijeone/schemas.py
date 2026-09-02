@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -92,6 +92,80 @@ class LegalSource(StrictModel):
     is_mock: bool = True
 
 
+class CustomsAssessment(StrictModel):
+    kind: Literal["customs"] = "customs"
+    hs_code_candidates: list[str] = Field(default_factory=list)
+    customs_confirmation_required: bool | None = None
+    applicable_requirements: list[str] = Field(default_factory=list)
+    required_documents: list[str] = Field(default_factory=list)
+    legal_sources: list[LegalSource] = Field(default_factory=list)
+
+
+class RadioAssessment(StrictModel):
+    kind: Literal["radio"] = "radio"
+    wireless_features: list[str] = Field(default_factory=list)
+    frequency_bands: list[str] = Field(default_factory=list)
+    conformity_assessment_required: bool | None = None
+    certification_type: str | None = None
+    legal_sources: list[LegalSource] = Field(default_factory=list)
+
+
+class FoodDrugAssessment(StrictModel):
+    kind: Literal["food_drug"] = "food_drug"
+    regulatory_categories: list[str] = Field(default_factory=list)
+    regulated: bool | None = None
+    detected_claims: list[str] = Field(default_factory=list)
+    ingredients_or_materials: list[str] = Field(default_factory=list)
+    applicable_requirements: list[str] = Field(default_factory=list)
+    legal_sources: list[LegalSource] = Field(default_factory=list)
+
+
+class ElectricalAssessment(StrictModel):
+    kind: Literal["electrical"] = "electrical"
+    power_sources: list[str] = Field(default_factory=list)
+    rated_specifications: list[str] = Field(default_factory=list)
+    safety_management_required: bool | None = None
+    certification_type: str | None = None
+    legal_sources: list[LegalSource] = Field(default_factory=list)
+
+
+class ChildrenAssessment(StrictModel):
+    kind: Literal["children"] = "children"
+    target_age_raw: str | None = None
+    intended_for_children: bool | None = None
+    product_type: str | None = None
+    safety_management_required: bool | None = None
+    certification_type: str | None = None
+    legal_sources: list[LegalSource] = Field(default_factory=list)
+
+
+class AdvertisingPhrase(StrictModel):
+    text: str
+    risk_type: str
+    risk_level: RiskLevel
+    reason: str
+    evidence_required: bool = False
+
+
+class AdvertisingAssessment(StrictModel):
+    kind: Literal["advertising"] = "advertising"
+    reviewed_phrases: list[str] = Field(default_factory=list)
+    detected_phrases: list[AdvertisingPhrase] = Field(default_factory=list)
+    overall_risk: RiskLevel
+    legal_sources: list[LegalSource] = Field(default_factory=list)
+
+
+ToolAssessment = Annotated[
+    CustomsAssessment
+    | RadioAssessment
+    | FoodDrugAssessment
+    | ElectricalAssessment
+    | ChildrenAssessment
+    | AdvertisingAssessment,
+    Field(discriminator="kind"),
+]
+
+
 class RegulatoryFinding(StrictModel):
     finding_id: str = Field(default_factory=lambda: str(uuid4()))
     tool_name: ToolName
@@ -113,6 +187,7 @@ class ToolResult(StrictModel):
     selected: bool
     selection_reason: str
     query: dict[str, Any] = Field(default_factory=dict)
+    result: ToolAssessment | None = None
     findings: list[RegulatoryFinding] = Field(default_factory=list)
     required_actions: list[str] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
@@ -198,11 +273,13 @@ class FinalVerificationStatus(StrEnum):
 
 class FinalAssessment(StrictModel):
     assessment_id: str
-    schema_version: str = "0.1.0"
+    schema_version: str = "0.2.0"
     product: Product
     verification_status: FinalVerificationStatus
     overall_status: OverallStatus
     summary: str
+    selected_tools: list[ToolName]
+    tool_results: list[ToolResult]
     findings: list[RegulatoryFinding]
     required_actions: list[str] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
