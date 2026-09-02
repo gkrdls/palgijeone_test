@@ -21,6 +21,12 @@ def print_flow(result) -> None:
     print(f"판단 개수: {len(result.findings)}")
     print(f"필요 조치: {len(result.required_actions)}개")
     print(f"추가 질문: {len(result.follow_up_questions)}개")
+    if result.verification.review_summary:
+        print(f"검증 요약: {result.verification.review_summary}")
+    if result.verification.issues:
+        print("검증 이슈:")
+        for issue in result.verification.issues:
+            print(f"  - [{issue.severity}] {issue.description}")
     if result.follow_up_questions:
         for question in result.follow_up_questions:
             print(f"  - {question.question}")
@@ -33,6 +39,17 @@ def main() -> None:
     group.add_argument("--all", action="store_true", help="모든 테스트 상품 실행")
     group.add_argument("--list", action="store_true", help="테스트 상품 목록")
     parser.add_argument("--json", action="store_true", help="최종 스키마 전체를 JSON으로 출력")
+    parser.add_argument(
+        "--agent-mode",
+        choices=("rules", "llm"),
+        default="rules",
+        help="규칙 기반 또는 Gemini LLM 에이전트 사용",
+    )
+    parser.add_argument(
+        "--model",
+        default="gemini-2.5-flash-lite",
+        help="LLM 모드에서 사용할 Gemini 모델",
+    )
     args = parser.parse_args()
 
     if args.list:
@@ -41,7 +58,19 @@ def main() -> None:
         return
 
     ids = list(SAMPLE_PRODUCTS) if args.all else [args.product or "wireless_rc_helicopter"]
-    pipeline = CompliancePipeline()
+    if args.agent_mode == "llm":
+        from .llm_agents import GeminiStructuredClient, LLMToolSelector, LLMVerificationAgent
+
+        try:
+            client = GeminiStructuredClient(model_name=args.model)
+        except RuntimeError as exc:
+            parser.error(str(exc))
+        pipeline = CompliancePipeline(
+            selector=LLMToolSelector(client),
+            verifier=LLMVerificationAgent(client),
+        )
+    else:
+        pipeline = CompliancePipeline()
     results = [pipeline.run(get_sample_product(product_id)) for product_id in ids]
 
     if args.json:

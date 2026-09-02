@@ -29,6 +29,27 @@ python -m palgijeone.cli --all
 python -m palgijeone.cli --product cosmetic_serum --json
 ```
 
+### Gemini LLM 에이전트 모드
+
+Google AI Studio에서 Gemini API 키를 만든 뒤 환경변수로 설정합니다. API 키는 파일이나
+명령행 인자에 저장하지 않습니다.
+
+```powershell
+$env:GEMINI_API_KEY="발급받은_API_키"
+python -m palgijeone.cli --product wireless_rc_helicopter --agent-mode llm
+```
+
+LLM 모드는 상품별로 두 번 호출합니다. 분석 에이전트가 6개 규제 툴의 선택 여부와 이유를
+구조화 응답으로 만들고, 규칙 기반 툴 실행 후 검증 에이전트가 결과의 누락·모순·근거를 다시
+검토합니다. `--model`로 모델을 바꿀 수 있으며 기본값은 `gemini-2.5-flash-lite`입니다.
+
+```powershell
+python -m palgijeone.cli --product cosmetic_serum --agent-mode llm --json
+```
+
+무료 구간의 요청 한도와 데이터 처리 정책은 Gemini API 정책을 따릅니다. 실제 상품 정보나
+민감한 데이터 대신 테스트 상품으로 먼저 실행하는 것을 권장합니다.
+
 프로젝트 루트에서 바로 실행할 수 있도록 루트의 `palgijeone` 패키지를 사용합니다.
 
 ## 테스트

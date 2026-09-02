@@ -39,7 +39,14 @@ class CompliancePipeline:
 
         decisions = self.selector.select(product)
         selected = [name.value for name, decision in decisions.items() if decision.selected]
-        record("analysis", "analysis_agent", "select_tools", "completed", ", ".join(selected))
+        selector_name = getattr(self.selector, "agent_name", "rules")
+        record(
+            "analysis",
+            "analysis_agent",
+            "select_tools",
+            "completed",
+            f"agent={selector_name}; selected={', '.join(selected)}",
+        )
 
         tool_results: list[ToolResult] = []
         for name in ToolName:
@@ -75,7 +82,7 @@ class CompliancePipeline:
             "verification_agent",
             "verify",
             verification.status.value,
-            f"issues={len(verification.issues)}",
+            f"agent={getattr(self.verifier, 'agent_name', 'rules')}; issues={len(verification.issues)}",
         )
 
         final = self.verifier.finalize(draft, verification)

@@ -1,8 +1,42 @@
 import unittest
 
+from palgijeone.llm_agents import (
+    LLMReviewResponse,
+    LLMToolSelector,
+    LLMVerificationAgent,
+    ToolSelectionItem,
+    ToolSelectionResponse,
+)
 from palgijeone.pipeline import CompliancePipeline
 from palgijeone.sample_products import SAMPLE_PRODUCTS, get_sample_product
 from palgijeone.schemas import FinalVerificationStatus, ToolName, ToolStatus, VerificationStatus
+from palgijeone.selector import ToolSelector
+
+
+class FakeStructuredLLMClient:
+    model_name = "fake-structured-model"
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def generate(self, prompt, response_model):
+        self.prompts.append(prompt)
+        if response_model is ToolSelectionResponse:
+            product = get_sample_product("adult_tshirt")
+            decisions = ToolSelector().select(product)
+            return ToolSelectionResponse(
+                decisions=[
+                    ToolSelectionItem(
+                        tool_name=name,
+                        selected=decision.selected,
+                        reason=decision.reason,
+                    )
+                    for name, decision in decisions.items()
+                ]
+            )
+        if response_model is LLMReviewResponse:
+            return LLMReviewResponse(issues=[], review_summary="내부 일관성 검토 완료")
+        raise AssertionError(f"예상하지 못한 응답 모델: {response_model}")
 
 
 class CompliancePipelineTest(unittest.TestCase):
@@ -42,6 +76,21 @@ class CompliancePipelineTest(unittest.TestCase):
         self.assertEqual(result.verification_status, FinalVerificationStatus.INCOMPLETE)
         self.assertTrue(result.follow_up_questions)
         self.assertTrue(result.verification.issues)
+
+    def test_llm_agents_use_two_structured_calls(self) -> None:
+        client = FakeStructuredLLMClient()
+        result = CompliancePipeline(
+            selector=LLMToolSelector(client),
+            verifier=LLMVerificationAgent(client),
+        ).run(get_sample_product("adult_tshirt"))
+
+        self.assertEqual(len(client.prompts), 2)
+        self.assertEqual(result.verification_status, FinalVerificationStatus.VERIFIED)
+        self.assertEqual(result.verification.review_summary, "내부 일관성 검토 완료")
+        analysis_event = next(event for event in result.trace if event.action == "select_tools")
+        verification_event = next(event for event in result.trace if event.action == "verify")
+        self.assertIn("llm:fake-structured-model", analysis_event.detail)
+        self.assertIn("llm:fake-structured-model+rules", verification_event.detail)
 
 
 if __name__ == "__main__":

@@ -182,6 +182,7 @@ class VerificationStatus(StrEnum):
 
 class VerificationResult(StrictModel):
     status: VerificationStatus
+    review_summary: str | None = None
     issues: list[VerificationIssue] = Field(default_factory=list)
     additional_tools_required: list[ToolName] = Field(default_factory=list)
     follow_up_questions: list[FollowUpQuestion] = Field(default_factory=list)
