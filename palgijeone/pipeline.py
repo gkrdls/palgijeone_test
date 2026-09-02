@@ -4,10 +4,24 @@ from __future__ import annotations
 
 from .aggregator import ResultAggregationTool
 from .regulatory_tools import RegulatoryTool, build_default_tools
-from .schemas import FinalAssessment, Product, ToolName, ToolResult, TraceEvent
+from .schemas import (
+    DraftAssessment,
+    FinalAssessment,
+    Product,
+    ToolName,
+    ToolResult,
+    TraceEvent,
+    VerificationIssue,
+    VerificationIssueType,
+    VerificationResult,
+)
 from .schemas import PipelineState, RemediationRecord, ToolStatus, VerificationStatus
 from .selector import SelectionDecision, ToolSelector
 from .verifier import VerificationAgent
+
+
+class InvalidVerificationReferenceError(ValueError):
+    """A verification issue references a finding outside the current draft."""
 
 
 class CompliancePipeline:
@@ -113,16 +127,59 @@ class CompliancePipeline:
                 f"status={state.draft.overall_status.value}",
             )
 
-            state.verification = self.verifier.verify(state.draft)
+            verification_failed = False
+            try:
+                state.verification = self.verifier.verify(state.draft)
+                self._validate_verification_references(state.draft, state.verification)
+                # A pending tool request cannot be treated as an approval.
+                if state.verification.additional_tools_required:
+                    state.verification.status = VerificationStatus.REVISION_REQUIRED
+            except Exception as exc:
+                verification_failed = True
+                invalid_reference = isinstance(exc, InvalidVerificationReferenceError)
+                issue_type = (
+                    VerificationIssueType.INVALID_VERIFICATION_RESPONSE
+                    if invalid_reference
+                    else VerificationIssueType.VERIFICATION_FAILURE
+                )
+                description = (
+                    "검증 응답의 finding 참조가 현재 초안과 일치하지 않습니다."
+                    if invalid_reference
+                    else f"검증을 완료하지 못했습니다 ({type(exc).__name__})."
+                )
+                # SDK exception messages can contain credentials or request contents.
+                state.verification = VerificationResult(
+                    status=VerificationStatus.REVISION_REQUIRED,
+                    review_summary="검증 실패로 자동 처리를 중단했습니다. 기존 툴 결과는 보존됩니다.",
+                    issues=[VerificationIssue(
+                        severity="critical",
+                        issue_type=issue_type,
+                        description=description,
+                        recommended_action=(
+                            "현재 초안의 finding_id를 사용하도록 검증 응답을 수정하세요."
+                            if invalid_reference
+                            else "검증 서비스 연결 또는 응답 형식을 확인한 뒤 다시 실행하세요."
+                        ),
+                    )],
+                    follow_up_questions=state.draft.follow_up_questions,
+                )
+            state.verification_history.append(state.verification.model_copy(deep=True))
             record(
                 "verification",
                 "verification_agent",
                 "verify",
-                state.verification.status.value,
+                "failed" if verification_failed else state.verification.status.value,
                 f"round={state.verification_round}; "
                 f"agent={getattr(self.verifier, 'agent_name', 'rules')}; "
                 f"issues={len(state.verification.issues)}",
             )
+
+            if verification_failed:
+                record(
+                    "remediation", "pipeline", "stop_retry", "verification_failed",
+                    state.verification.issues[0].description,
+                )
+                break
 
             # 승인, 경고 승인, 사용자 입력 필요 상태는 자동 재검사 대상이 아니다.
             if state.verification.status != VerificationStatus.REVISION_REQUIRED:
@@ -208,6 +265,7 @@ class CompliancePipeline:
         final = self.verifier.finalize(state.draft, state.verification)
         final.tool_result_history = state.tool_result_history
         final.verification_rounds = state.verification_round
+        final.verification_history = state.verification_history
         final.remediation_history = state.remediation_history
         record(
             "output",
@@ -220,9 +278,23 @@ class CompliancePipeline:
         return final
 
     @staticmethod
-    def _retry_tools(draft, verification) -> list[ToolName]:
+    def _validate_verification_references(
+        draft: DraftAssessment, verification: VerificationResult
+    ) -> None:
+        finding_ids = {finding.finding_id for finding in draft.findings}
+        references = {
+            finding_id
+            for issue in verification.issues
+            for finding_id in issue.related_finding_ids
+        } | set(verification.checked_finding_ids)
+        if not references.issubset(finding_ids):
+            raise InvalidVerificationReferenceError("Unknown finding reference")
+
+    @staticmethod
+    def _retry_tools(draft: DraftAssessment, verification: VerificationResult) -> list[ToolName]:
         """추가 요청, 툴 실패, critical finding을 재실행 대상 목록으로 합친다."""
 
+        CompliancePipeline._validate_verification_references(draft, verification)
         requested = list(verification.additional_tools_required)
         requested.extend(
             result.tool_name
@@ -237,13 +309,12 @@ class CompliancePipeline:
             requested.extend(
                 finding_tools[finding_id]
                 for finding_id in issue.related_finding_ids
-                if finding_id in finding_tools
             )
 
         return list(dict.fromkeys(requested))
 
     @staticmethod
-    def _retry_reason(verification) -> str:
+    def _retry_reason(verification: VerificationResult) -> str:
         """재호출된 ToolResult에 남길 사람이 읽을 수 있는 사유를 만든다."""
 
         critical_descriptions = [

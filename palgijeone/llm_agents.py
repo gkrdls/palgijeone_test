@@ -11,6 +11,7 @@ from typing import Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, Field
 
+from .config import load_project_env
 from .schemas import (
     DraftAssessment,
     ToolName,
@@ -43,10 +44,11 @@ class GeminiStructuredClient:
         api_key: str | None = None,
         model_name: str = "gemini-2.5-flash-lite",
     ) -> None:
-        resolved_key = api_key or os.getenv("GEMINI_API_KEY")
+        load_project_env()
+        resolved_key = (api_key or os.getenv("GEMINI_API_KEY") or "").strip()
         if not resolved_key:
             raise RuntimeError(
-                "GEMINI_API_KEY 환경변수가 없습니다. Google AI Studio에서 키를 만든 뒤 설정해 주세요."
+                "GEMINI_API_KEY가 비어 있습니다. 저장소 루트의 .env 또는 환경변수에 설정해 주세요."
             )
 
         try:
@@ -182,6 +184,8 @@ class LLMVerificationAgent(VerificationAgent):
 - is_mock=true인 출처는 프로토타입 근거로 인정하고, Mock이라는 이유만으로 오류 처리하지 마세요.
 - 판매 가능 여부가 아니라 결과의 완전성, 일관성, 추적 가능성을 검증하세요.
 - critical은 재실행이나 수정 없이는 결과를 신뢰할 수 없을 때만 사용하세요.
+- related_finding_ids에는 현재 초안에 존재하는 finding_id만 사용하세요.
+- 누락된 툴에는 finding이 없으므로 ID를 만들지 말고 additional_tools_required로 요청하세요.
 - 출력은 제공된 JSON 스키마만 따르세요.
 
 초안:
@@ -210,7 +214,7 @@ class LLMVerificationAgent(VerificationAgent):
         additional_tools = list(
             dict.fromkeys([*baseline.additional_tools_required, *review.additional_tools_required])
         )
-        if any(issue.severity == "critical" for issue in issues):
+        if additional_tools or any(issue.severity == "critical" for issue in issues):
             status = VerificationStatus.REVISION_REQUIRED
         elif draft.follow_up_questions:
             status = VerificationStatus.USER_INPUT_REQUIRED

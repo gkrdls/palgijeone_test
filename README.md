@@ -3,7 +3,7 @@
 상품 상세페이지에서 파싱한 정보를 기준으로 분석 에이전트가 필요한 규제 툴을 선택하고,
 툴 결과를 종합한 뒤 검증 에이전트가 최종 결과를 만드는 흐름을 확인하기 위한 프로그램입니다.
 
-현재 외부 API를 직접 호출하지 않습니다. 6개 규제 툴은 결정론적인 Mock 구현이며,
+현재 규제 기관의 외부 API를 직접 호출하지 않습니다. 6개 규제 툴은 결정론적인 Mock 구현이며,
 각 툴의 `run()` 내부를 관세청·식약처·법제처 API 어댑터로 교체할 수 있도록 분리했습니다.
 
 ## 전체 흐름
@@ -38,6 +38,15 @@ v0.2에서도 공통 `findings`는 유지합니다. `result`는 툴별 구조화
 `incomplete` 최종 결과와 질문을 반환합니다. 모든 재호출 결과는 `tool_result_history`와
 `remediation_history`에 보존됩니다.
 
+추가 툴 요청이 남아 있으면 critical 이슈 유무와 관계없이 재검사합니다. 검증 응답의
+finding 참조가 현재 초안과 맞지 않거나 검증 호출 자체가 실패하면, 규제 툴을 무작정
+재실행하지 않고 `incomplete`로 종료합니다. 실패 이유는 검증 이슈와 trace에,
+각 회차의 검증 결과는 `verification_history`에 남습니다. SDK 예외 메시지 원문은
+키나 요청 데이터가 노출되지 않도록 결과에 포함하지 않습니다.
+
+현재 루프는 같은 상품으로 툴을 재호출합니다. 일시적 오류나 누락된 툴 실행은 처리하지만,
+새 정보 수집이나 판정 로직 수정까지 자동으로 수행하지는 않습니다.
+
 ## 실행
 
 Python 3.11 이상을 권장합니다.
@@ -52,15 +61,24 @@ python -m palgijeone.cli --product cosmetic_serum --json
 
 ### Gemini LLM 에이전트 모드
 
-Google AI Studio에서 Gemini API 키를 만든 뒤 환경변수로 설정합니다. API 키는 파일이나
-명령행 인자에 저장하지 않습니다.
+Google AI Studio에서 Gemini API 키를 만든 뒤 저장소 루트의 `.env`에 입력합니다.
+파일이 없다면 `.env.example`을 기준으로 만듭니다. `.env`와 `.env.*`는 Git에서
+제외되며 빈 키 템플릿인 `.env.example`만 공유합니다. 실제 키를 커밋하거나 채팅에 올리지 마세요.
+
+```dotenv
+GEMINI_API_KEY=발급받은_API_키
+```
+
+LLM 클라이언트가 실행 위치에 관계없이 저장소 루트의 `.env`를 자동으로 읽습니다.
+이미 설정된 환경변수가 `.env`보다 우선하며, 코드에서 명시한 `api_key`는 둘보다 우선합니다.
 
 ```powershell
-$env:GEMINI_API_KEY="발급받은_API_키"
+python -m pip install -r requirements.txt
 python -m palgijeone.cli --product wireless_rc_helicopter --agent-mode llm
 ```
 
-LLM 모드는 상품별로 두 번 호출합니다. 분석 에이전트가 6개 규제 툴의 선택 여부와 이유를
+LLM 모드는 최초 분석과 검증에 두 번, 재검사마다 추가 검증에 한 번씩 호출합니다.
+기본 재검사 한도 2회일 때 정상 응답 기준 최대 4회입니다. 분석 에이전트가 6개 규제 툴의 선택 여부와 이유를
 구조화 응답으로 만들고, 규칙 기반 툴 실행 후 검증 에이전트가 결과의 누락·모순·근거를 다시
 검토합니다. `--model`로 모델을 바꿀 수 있으며 기본값은 `gemini-2.5-flash-lite`입니다.
 

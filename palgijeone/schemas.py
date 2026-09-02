@@ -311,6 +311,8 @@ class VerificationIssueType(StrEnum):
     CONTRADICTION = "contradiction"
     INSUFFICIENT_PRODUCT_DATA = "insufficient_product_data"
     INCORRECT_DETERMINATION = "incorrect_determination"
+    INVALID_VERIFICATION_RESPONSE = "invalid_verification_response"
+    VERIFICATION_FAILURE = "verification_failure"
 
 
 class VerificationIssue(StrictModel):
@@ -366,6 +368,7 @@ class PipelineState(StrictModel):
     tool_result_history: list[ToolResult] = Field(default_factory=list)
     draft: DraftAssessment | None = None
     verification: VerificationResult | None = None
+    verification_history: list[VerificationResult] = Field(default_factory=list)
     remediation_history: list[RemediationRecord] = Field(default_factory=list)
 
 
@@ -398,6 +401,7 @@ class FinalAssessment(StrictModel):
     missing_information: list[str] = Field(default_factory=list)
     follow_up_questions: list[FollowUpQuestion] = Field(default_factory=list)
     verification: VerificationResult
+    verification_history: list[VerificationResult] = Field(default_factory=list)
     verification_rounds: int = Field(default=1, ge=1)
     remediation_history: list[RemediationRecord] = Field(
         default_factory=list,
