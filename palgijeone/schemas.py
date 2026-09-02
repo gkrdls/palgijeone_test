@@ -183,6 +183,7 @@ class RegulatoryFinding(StrictModel):
 
 class ToolResult(StrictModel):
     tool_name: ToolName
+    attempt: int = Field(default=1, ge=1)
     status: ToolStatus
     selected: bool
     selection_reason: str
@@ -265,6 +266,28 @@ class VerificationResult(StrictModel):
     verified_at: datetime = Field(default_factory=utc_now)
 
 
+class RemediationRecord(StrictModel):
+    iteration: int = Field(ge=1)
+    trigger_status: VerificationStatus
+    tools: list[ToolName]
+    reason: str
+    result_statuses: dict[ToolName, ToolStatus] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class PipelineState(StrictModel):
+    """재검사 루프 중 유지하는 내부 실행 상태."""
+
+    product: Product
+    verification_round: int = Field(default=1, ge=1)
+    max_remediation_attempts: int = Field(default=2, ge=0)
+    tool_results: list[ToolResult] = Field(default_factory=list)
+    tool_result_history: list[ToolResult] = Field(default_factory=list)
+    draft: DraftAssessment | None = None
+    verification: VerificationResult | None = None
+    remediation_history: list[RemediationRecord] = Field(default_factory=list)
+
+
 class FinalVerificationStatus(StrEnum):
     VERIFIED = "verified"
     VERIFIED_WITH_WARNINGS = "verified_with_warnings"
@@ -273,18 +296,21 @@ class FinalVerificationStatus(StrEnum):
 
 class FinalAssessment(StrictModel):
     assessment_id: str
-    schema_version: str = "0.2.0"
+    schema_version: str = "0.3.0"
     product: Product
     verification_status: FinalVerificationStatus
     overall_status: OverallStatus
     summary: str
     selected_tools: list[ToolName]
     tool_results: list[ToolResult]
+    tool_result_history: list[ToolResult] = Field(default_factory=list)
     findings: list[RegulatoryFinding]
     required_actions: list[str] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
     follow_up_questions: list[FollowUpQuestion] = Field(default_factory=list)
     verification: VerificationResult
+    verification_rounds: int = Field(default=1, ge=1)
+    remediation_history: list[RemediationRecord] = Field(default_factory=list)
     trace: list[TraceEvent] = Field(default_factory=list)
     generated_at: datetime = Field(default_factory=utc_now)
 

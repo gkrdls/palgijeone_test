@@ -22,10 +22,21 @@
 - `v0.1-flow` 태그: 모든 툴이 공통 `ToolResult`와 `RegulatoryFinding`만 반환하는 기준 버전
 - `feat/typed-tool-results` 브랜치: 공통 결과 안에 6개 툴별 전용 `result` 스키마를 추가한 v0.2
 - `examples/v0_1_generic_result.json`, `examples/v0_2_typed_tool_result.json`: 두 형식의 비교 예시
+- `examples/v0_3_retry_flow.json`: 검증 후 통관 툴을 재호출한 흐름 예시
 
 v0.2에서도 공통 `findings`는 유지합니다. `result`는 툴별 구조화 결과, `findings`는
 종합·검증 단계에서 공통으로 사용하는 판단, `raw_response`는 외부 API 원본 응답입니다.
 최종 `FinalAssessment`에도 6개의 `tool_results`를 보존해 판단 근거를 역추적할 수 있습니다.
+
+### 검증 후 재검사 루프(v0.3)
+
+`feat/verification-retry-loop` 브랜치에서는 검증 결과가 `revision_required`일 때
+`additional_tools_required`, 실패한 툴, critical 이슈와 연결된 finding을 기준으로 필요한 툴만
+재호출합니다. 이후 결과를 다시 종합하고 검증하며 기본 최대 재검사 횟수는 2회입니다.
+
+`user_input_required`는 자동 재검사하지 않습니다. 사용자의 답변이 필요한 상태이므로
+`incomplete` 최종 결과와 질문을 반환합니다. 모든 재호출 결과는 `tool_result_history`와
+`remediation_history`에 보존됩니다.
 
 ## 실행
 

@@ -1,0 +1,40 @@
+{
+  "schema_version": "0.3.0",
+  "verification_rounds": 2,
+  "tool_results": [
+    {
+      "tool_name": "customs_requirements",
+      "attempt": 2,
+      "status": "success",
+      "selected": true
+    }
+  ],
+  "tool_result_history": [
+    {
+      "tool_name": "customs_requirements",
+      "attempt": 1,
+      "status": "failed",
+      "selected": true
+    },
+    {
+      "tool_name": "customs_requirements",
+      "attempt": 2,
+      "status": "success",
+      "selected": true
+    }
+  ],
+  "remediation_history": [
+    {
+      "iteration": 1,
+      "trigger_status": "revision_required",
+      "tools": ["customs_requirements"],
+      "reason": "검증 에이전트가 통관 툴 재검사를 요청함",
+      "result_statuses": {
+        "customs_requirements": "success"
+      }
+    }
+  ],
+  "verification": {
+    "status": "approved"
+  }
+}

@@ -21,6 +21,11 @@ def print_flow(result) -> None:
     print(f"판단 개수: {len(result.findings)}")
     print(f"필요 조치: {len(result.required_actions)}개")
     print(f"추가 질문: {len(result.follow_up_questions)}개")
+    print(f"검증 횟수: {result.verification_rounds}회")
+    print(f"재검사 조치: {len(result.remediation_history)}회")
+    for remediation in result.remediation_history:
+        tools = ", ".join(tool.value for tool in remediation.tools)
+        print(f"  - 재검사 {remediation.iteration}: {tools}")
     if result.verification.review_summary:
         print(f"검증 요약: {result.verification.review_summary}")
     if result.verification.issues:

@@ -8,6 +8,7 @@ from palgijeone.llm_agents import (
     ToolSelectionResponse,
 )
 from palgijeone.pipeline import CompliancePipeline
+from palgijeone.regulatory_tools import build_default_tools
 from palgijeone.sample_products import SAMPLE_PRODUCTS, get_sample_product
 from palgijeone.schemas import (
     AdvertisingAssessment,
@@ -19,9 +20,11 @@ from palgijeone.schemas import (
     RadioAssessment,
     ToolName,
     ToolStatus,
+    VerificationResult,
     VerificationStatus,
 )
 from palgijeone.selector import ToolSelector
+from palgijeone.verifier import VerificationAgent
 
 
 class FakeStructuredLLMClient:
@@ -48,6 +51,36 @@ class FakeStructuredLLMClient:
         if response_model is LLMReviewResponse:
             return LLMReviewResponse(issues=[], review_summary="내부 일관성 검토 완료")
         raise AssertionError(f"예상하지 못한 응답 모델: {response_model}")
+
+
+class FlakyTool:
+    def __init__(self, delegate, failures: int) -> None:
+        self.delegate = delegate
+        self.name = delegate.name
+        self.failures = failures
+        self.calls = 0
+
+    def execute(self, product, decision):
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise RuntimeError("테스트용 일시적 툴 오류")
+        return self.delegate.execute(product, decision)
+
+
+class AdditionalToolOnceVerifier(VerificationAgent):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def verify(self, draft):
+        self.calls += 1
+        if self.calls == 1:
+            return VerificationResult(
+                status=VerificationStatus.REVISION_REQUIRED,
+                additional_tools_required=[ToolName.CUSTOMS],
+                checked_finding_ids=[finding.finding_id for finding in draft.findings],
+            )
+        return super().verify(draft)
 
 
 class CompliancePipelineTest(unittest.TestCase):
@@ -95,9 +128,9 @@ class CompliancePipelineTest(unittest.TestCase):
 
         self.assertEqual(set(results_by_tool), set(ToolName))
 
-    def test_final_schema_version_is_v0_2(self) -> None:
+    def test_final_schema_version_is_v0_3(self) -> None:
         result = self.pipeline.run(get_sample_product("adult_tshirt"))
-        self.assertEqual(result.schema_version, "0.2.0")
+        self.assertEqual(result.schema_version, "0.3.0")
         self.assertEqual(len(result.tool_results), 6)
 
     def test_adult_tshirt_skips_unrelated_tools(self) -> None:
@@ -115,6 +148,55 @@ class CompliancePipelineTest(unittest.TestCase):
         self.assertEqual(result.verification_status, FinalVerificationStatus.INCOMPLETE)
         self.assertTrue(result.follow_up_questions)
         self.assertTrue(result.verification.issues)
+        self.assertEqual(result.verification_rounds, 1)
+        self.assertEqual(result.remediation_history, [])
+
+    def test_failed_tool_is_retried_then_reaggregated_and_reverified(self) -> None:
+        tools = build_default_tools()
+        flaky_customs = FlakyTool(tools[ToolName.CUSTOMS], failures=1)
+        tools[ToolName.CUSTOMS] = flaky_customs
+
+        result = CompliancePipeline(tools=tools).run(get_sample_product("adult_tshirt"))
+
+        self.assertEqual(flaky_customs.calls, 2)
+        self.assertEqual(result.verification_rounds, 2)
+        self.assertEqual(len(result.remediation_history), 1)
+        self.assertEqual(result.remediation_history[0].tools, [ToolName.CUSTOMS])
+        self.assertEqual(len(result.tool_result_history), 7)
+        customs = next(item for item in result.tool_results if item.tool_name == ToolName.CUSTOMS)
+        self.assertEqual(customs.status, ToolStatus.SUCCESS)
+        self.assertEqual(customs.attempt, 2)
+        self.assertEqual(result.verification_status, FinalVerificationStatus.VERIFIED)
+
+    def test_additional_tools_required_is_executed(self) -> None:
+        tools = build_default_tools()
+        counting_customs = FlakyTool(tools[ToolName.CUSTOMS], failures=0)
+        tools[ToolName.CUSTOMS] = counting_customs
+        verifier = AdditionalToolOnceVerifier()
+
+        result = CompliancePipeline(tools=tools, verifier=verifier).run(
+            get_sample_product("adult_tshirt")
+        )
+
+        self.assertEqual(counting_customs.calls, 2)
+        self.assertEqual(verifier.calls, 2)
+        self.assertEqual(result.verification_rounds, 2)
+
+    def test_retry_loop_stops_at_configured_limit(self) -> None:
+        tools = build_default_tools()
+        always_failing_customs = FlakyTool(tools[ToolName.CUSTOMS], failures=99)
+        tools[ToolName.CUSTOMS] = always_failing_customs
+
+        result = CompliancePipeline(tools=tools, max_remediation_attempts=1).run(
+            get_sample_product("adult_tshirt")
+        )
+
+        self.assertEqual(always_failing_customs.calls, 2)
+        self.assertEqual(result.verification_rounds, 2)
+        self.assertEqual(len(result.remediation_history), 1)
+        self.assertEqual(result.verification_status, FinalVerificationStatus.INCOMPLETE)
+        exhausted = [event for event in result.trace if event.status == "exhausted"]
+        self.assertEqual(len(exhausted), 1)
 
     def test_llm_agents_use_two_structured_calls(self) -> None:
         client = FakeStructuredLLMClient()
