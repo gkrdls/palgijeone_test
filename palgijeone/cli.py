@@ -1,3 +1,5 @@
+"""규칙 기반 또는 Gemini 기반 파이프라인을 실행하는 명령행 인터페이스."""
+
 from __future__ import annotations
 
 import argparse
@@ -8,6 +10,8 @@ from .sample_products import SAMPLE_PRODUCTS, get_sample_product
 
 
 def print_flow(result) -> None:
+    """최종 결과와 TraceEvent를 사람이 읽기 쉬운 실행 흐름으로 출력한다."""
+
     print(f"\n상품: {result.product.product_name} ({result.product.product_id})")
     print("=" * 72)
     for event in result.trace:
@@ -38,6 +42,8 @@ def print_flow(result) -> None:
 
 
 def main() -> None:
+    """CLI 인자를 해석해 테스트 상품 하나 또는 전체를 실행한다."""
+
     parser = argparse.ArgumentParser(description="팔기전에 규제 심사 흐름 프로토타입")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--product", choices=sorted(SAMPLE_PRODUCTS), help="실행할 테스트 상품 ID")
@@ -64,6 +70,7 @@ def main() -> None:
 
     ids = list(SAMPLE_PRODUCTS) if args.all else [args.product or "wireless_rc_helicopter"]
     if args.agent_mode == "llm":
+        # LLM 모드에서만 선택 의존성을 import해 규칙 모드는 API 키 없이 실행 가능하다.
         from .llm_agents import GeminiStructuredClient, LLMToolSelector, LLMVerificationAgent
 
         try:

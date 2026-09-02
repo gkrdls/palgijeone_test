@@ -1,3 +1,9 @@
+"""Gemini 구조화 출력을 사용하는 툴 선택 및 독립 검증 에이전트.
+
+LLM이 임의 형식의 텍스트를 반환하지 않도록 모든 응답을 Pydantic 모델로 검증한다.
+검증 에이전트는 LLM 검토 전에 규칙 기반 검증을 먼저 수행한다.
+"""
+
 from __future__ import annotations
 
 import os
@@ -21,6 +27,8 @@ ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
 
 
 class StructuredLLMClient(Protocol):
+    """특정 LLM SDK에 종속되지 않는 구조화 출력 클라이언트 계약."""
+
     model_name: str
 
     def generate(self, prompt: str, response_model: type[ResponseModel]) -> ResponseModel:
@@ -28,7 +36,7 @@ class StructuredLLMClient(Protocol):
 
 
 class GeminiStructuredClient:
-    """Small adapter around Gemini structured output for prototype agents."""
+    """Gemini Interactions API 응답을 지정한 Pydantic 모델로 변환하는 어댑터."""
 
     def __init__(
         self,
@@ -52,6 +60,8 @@ class GeminiStructuredClient:
         self._client = genai.Client(api_key=resolved_key)
 
     def generate(self, prompt: str, response_model: type[ResponseModel]) -> ResponseModel:
+        """JSON Schema를 Gemini에 전달하고 반환 JSON을 다시 엄격히 검증한다."""
+
         interaction = self._client.interactions.create(
             model=self.model_name,
             input=prompt,
@@ -67,16 +77,22 @@ class GeminiStructuredClient:
 
 
 class ToolSelectionItem(BaseModel):
+    """LLM이 판단한 규제 툴 하나의 선택 여부와 상품 기반 사유."""
+
     tool_name: ToolName
     selected: bool
     reason: str = Field(min_length=1)
 
 
 class ToolSelectionResponse(BaseModel):
+    """LLM이 반드시 한 번씩 반환해야 하는 6개 툴 선택 목록."""
+
     decisions: list[ToolSelectionItem]
 
 
 class LLMToolSelector(ToolSelector):
+    """파싱된 Product를 읽고 실행할 규제 툴을 구조화 출력으로 선택한다."""
+
     def __init__(self, client: StructuredLLMClient) -> None:
         self.client = client
         self.agent_name = f"llm:{client.model_name}"
@@ -111,6 +127,7 @@ class LLMToolSelector(ToolSelector):
 """.strip()
         response = self.client.generate(prompt, ToolSelectionResponse)
 
+        # 중복 또는 누락된 툴이 있으면 잘못된 LLM 응답으로 간주한다.
         names = [item.tool_name for item in response.decisions]
         if len(names) != len(ToolName) or set(names) != set(ToolName):
             raise ValueError("LLM 선택 결과에는 서로 다른 6개 규제 도구가 모두 있어야 합니다.")
@@ -122,6 +139,8 @@ class LLMToolSelector(ToolSelector):
 
 
 class LLMReviewIssue(BaseModel):
+    """LLM 검토에서 발견한 하나의 경고 또는 치명적 문제."""
+
     severity: Literal["warning", "critical"]
     issue_type: VerificationIssueType
     description: str = Field(min_length=1)
@@ -130,13 +149,15 @@ class LLMReviewIssue(BaseModel):
 
 
 class LLMReviewResponse(BaseModel):
+    """LLM 검증 에이전트의 구조화된 전체 응답."""
+
     issues: list[LLMReviewIssue] = Field(default_factory=list)
     additional_tools_required: list[ToolName] = Field(default_factory=list)
     review_summary: str = Field(min_length=1)
 
 
 class LLMVerificationAgent(VerificationAgent):
-    """Combines invariant checks with an independent LLM review."""
+    """규칙 기반 불변 조건 검사와 독립적인 LLM 검토를 결합한다."""
 
     def __init__(
         self,
@@ -148,6 +169,8 @@ class LLMVerificationAgent(VerificationAgent):
         self.agent_name = f"llm:{client.model_name}+rules"
 
     def verify(self, draft: DraftAssessment) -> VerificationResult:
+        """규칙 검증을 먼저 실행한 뒤 LLM 이슈와 추가 툴 요청을 병합한다."""
+
         baseline = super().verify(draft)
         prompt = f"""
 당신은 규제 심사 프로토타입의 독립 검증 에이전트입니다.
@@ -166,6 +189,7 @@ class LLMVerificationAgent(VerificationAgent):
 """.strip()
         review = self.client.generate(prompt, LLMReviewResponse)
 
+        # 동일한 유형과 설명의 이슈는 한 번만 최종 결과에 포함한다.
         issues = list(baseline.issues)
         known = {(issue.issue_type, issue.description) for issue in issues}
         for item in review.issues:

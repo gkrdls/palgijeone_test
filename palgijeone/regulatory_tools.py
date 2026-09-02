@@ -1,3 +1,9 @@
+"""동일한 ToolResult 계약을 따르는 6개 규제 툴의 Mock 구현.
+
+현재 판단과 법적 근거는 흐름 검증용이다. 실제 연동 시 각 `run()`의 Mock 로직을
+관세청·식약처·법제처 등의 API 호출로 교체하되 반환 스키마는 유지한다.
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -25,6 +31,8 @@ from .selector import SelectionDecision
 
 
 def mock_source(name: str, law: str, article: str | None = None) -> LegalSource:
+    """Mock 근거가 실제 법령 조회 결과로 오인되지 않도록 명시해 생성한다."""
+
     return LegalSource(
         source_name=name,
         law_name=law,
@@ -36,9 +44,13 @@ def mock_source(name: str, law: str, article: str | None = None) -> LegalSource:
 
 
 class RegulatoryTool(ABC):
+    """모든 규제 툴이 구현해야 하는 공통 실행 인터페이스."""
+
     name: ToolName
 
     def execute(self, product: Product, decision: SelectionDecision) -> ToolResult:
+        """선택된 툴만 실행하고 제외된 툴도 not_applicable 결과로 남긴다."""
+
         if not decision.selected:
             return ToolResult(
                 tool_name=self.name,
@@ -52,6 +64,8 @@ class RegulatoryTool(ABC):
 
     @abstractmethod
     def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
+        """도메인별 규제 조회와 결과 정규화를 구현하는 확장 지점."""
+
         raise NotImplementedError
 
     def result(
@@ -63,6 +77,8 @@ class RegulatoryTool(ABC):
         actions: list[str] | None = None,
         missing: list[str] | None = None,
     ) -> ToolResult:
+        """도메인 결과와 공통 finding을 표준 ToolResult로 감싼다."""
+
         return ToolResult(
             tool_name=self.name,
             status=ToolStatus.PARTIAL if missing else ToolStatus.SUCCESS,
@@ -78,6 +94,8 @@ class RegulatoryTool(ABC):
 
 
 class CustomsRequirementsTool(RegulatoryTool):
+    """통관, HS 코드와 세관장 확인 요건을 점검하는 툴."""
+
     name = ToolName.CUSTOMS
 
     def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
@@ -113,6 +131,8 @@ class CustomsRequirementsTool(RegulatoryTool):
 
 
 class RadioComplianceTool(RegulatoryTool):
+    """무선 기능과 방송통신기자재 적합성평가 가능성을 점검하는 툴."""
+
     name = ToolName.RADIO
 
     def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
@@ -146,6 +166,8 @@ class RadioComplianceTool(RegulatoryTool):
 
 
 class FoodDrugSafetyTool(RegulatoryTool):
+    """식품 접촉·화장품·의료 효능 표방을 식약처 영역에서 점검하는 툴."""
+
     name = ToolName.FOOD_DRUG
 
     def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
@@ -200,6 +222,8 @@ class FoodDrugSafetyTool(RegulatoryTool):
 
 
 class ElectricalSafetyTool(RegulatoryTool):
+    """전원과 배터리 정보를 바탕으로 전안법 적용 가능성을 점검하는 툴."""
+
     name = ToolName.ELECTRICAL
 
     def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
@@ -244,6 +268,8 @@ class ElectricalSafetyTool(RegulatoryTool):
 
 
 class ChildrenProductSafetyTool(RegulatoryTool):
+    """연령 원문과 실제 용도를 함께 사용해 어린이제품 여부를 점검하는 툴."""
+
     name = ToolName.CHILDREN
 
     def run(self, product: Product, decision: SelectionDecision) -> ToolResult:
@@ -282,6 +308,8 @@ class ChildrenProductSafetyTool(RegulatoryTool):
 
 
 class LabelAdvertisingDetectionTool(RegulatoryTool):
+    """상세페이지에서 치료·절대·비교 표현과 입증 필요 문구를 탐지하는 툴."""
+
     name = ToolName.LABEL_AD
     RISKY_TERMS = ("완전 제거", "치료", "최저가", "100%", "완벽")
 
@@ -333,6 +361,8 @@ class LabelAdvertisingDetectionTool(RegulatoryTool):
 
 
 def build_default_tools() -> dict[ToolName, RegulatoryTool]:
+    """ToolName으로 즉시 조회할 수 있는 기본 툴 레지스트리를 생성한다."""
+
     tools: list[RegulatoryTool] = [
         CustomsRequirementsTool(),
         RadioComplianceTool(),

@@ -1,3 +1,9 @@
+"""파이프라인의 입력부터 최종 출력까지 사용하는 Pydantic 계약 모음.
+
+외부 API 원본(`raw_response`), 툴별 정규화 결과(`result`), 공통 규제 판단
+(`findings`)을 분리해 각 판단의 근거를 역추적할 수 있도록 설계한다.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -9,14 +15,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 def utc_now() -> datetime:
+    """타임존이 포함된 현재 UTC 시각을 반환한다."""
+
     return datetime.now(timezone.utc)
 
 
 class StrictModel(BaseModel):
+    """정의되지 않은 입력 필드를 거부하는 모든 프로젝트 스키마의 기반 모델."""
+
     model_config = ConfigDict(extra="forbid")
 
 
+# 상품 파싱 단계 -------------------------------------------------------------
 class Attribute(StrictModel):
+    """고정 Product 필드에 포함되지 않는 상품별 추가 속성과 출처."""
+
     name: str
     value: str
     source_text: str | None = None
@@ -30,8 +43,12 @@ class Product(StrictModel):
     product_name: str | None = None
     category: str | None = None
     intended_use: str | None = None
-    target_age: str | None = None
+    target_age: str | None = Field(
+        default=None,
+        description="'만 14세 이상'처럼 상세페이지에 표시된 대상 연령 원문",
+    )
 
+    # bool의 None은 False가 아니라 상세페이지에서 확인하지 못했다는 뜻이다.
     wireless: bool | None = None
     battery_included: bool | None = None
     electrical_powered: bool | None = None
@@ -39,12 +56,18 @@ class Product(StrictModel):
     medical_claim: bool | None = None
     cosmetic_claim: bool | None = None
 
-    listing_text: list[str] = Field(default_factory=list)
+    listing_text: list[str] = Field(
+        default_factory=list,
+        description="표시광고 문구 탐지에 사용할 상세페이지 문장",
+    )
     attributes: list[Attribute] = Field(default_factory=list)
     source_url: str | None = None
 
 
+# 공통 상태 값 ---------------------------------------------------------------
 class ToolName(StrEnum):
+    """분석 에이전트가 선택할 수 있는 6개 규제 툴의 식별자."""
+
     CUSTOMS = "customs_requirements"
     RADIO = "radio_compliance"
     FOOD_DRUG = "food_drug_safety"
@@ -54,6 +77,8 @@ class ToolName(StrEnum):
 
 
 class ToolStatus(StrEnum):
+    """툴 호출 자체의 실행 상태."""
+
     SUCCESS = "success"
     PARTIAL = "partial"
     FAILED = "failed"
@@ -61,6 +86,8 @@ class ToolStatus(StrEnum):
 
 
 class Determination(StrEnum):
+    """툴 실행 후 내려진 개별 규제 적용 판단."""
+
     REQUIRED = "required"
     NOT_REQUIRED = "not_required"
     POSSIBLY_REQUIRED = "possibly_required"
@@ -69,6 +96,8 @@ class Determination(StrEnum):
 
 
 class RiskLevel(StrEnum):
+    """개별 판단 또는 문구의 위험 수준."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -76,13 +105,18 @@ class RiskLevel(StrEnum):
 
 
 class OverallStatus(StrEnum):
+    """여러 툴 결과를 종합한 상품 전체 상태."""
+
     LIKELY_COMPLIANT = "likely_compliant"
     ACTION_REQUIRED = "action_required"
     HIGH_RISK = "high_risk"
     INSUFFICIENT_INFORMATION = "insufficient_information"
 
 
+# 근거와 툴별 상세 결과 ------------------------------------------------------
 class LegalSource(StrictModel):
+    """규제 판단을 뒷받침하는 법령·기관·API 출처."""
+
     source_name: str
     law_name: str | None = None
     article: str | None = None
@@ -93,6 +127,8 @@ class LegalSource(StrictModel):
 
 
 class CustomsAssessment(StrictModel):
+    """통관 요건 툴이 정규화한 HS 코드·서류·확인 요건."""
+
     kind: Literal["customs"] = "customs"
     hs_code_candidates: list[str] = Field(default_factory=list)
     customs_confirmation_required: bool | None = None
@@ -102,6 +138,8 @@ class CustomsAssessment(StrictModel):
 
 
 class RadioAssessment(StrictModel):
+    """전파 툴이 정규화한 무선 기능·주파수·적합성평가 정보."""
+
     kind: Literal["radio"] = "radio"
     wireless_features: list[str] = Field(default_factory=list)
     frequency_bands: list[str] = Field(default_factory=list)
@@ -111,6 +149,8 @@ class RadioAssessment(StrictModel):
 
 
 class FoodDrugAssessment(StrictModel):
+    """식약 툴이 정규화한 제품 유형·효능 표방·원료 정보."""
+
     kind: Literal["food_drug"] = "food_drug"
     regulatory_categories: list[str] = Field(default_factory=list)
     regulated: bool | None = None
@@ -121,6 +161,8 @@ class FoodDrugAssessment(StrictModel):
 
 
 class ElectricalAssessment(StrictModel):
+    """전안법 툴이 정규화한 전원·정격·안전관리 정보."""
+
     kind: Literal["electrical"] = "electrical"
     power_sources: list[str] = Field(default_factory=list)
     rated_specifications: list[str] = Field(default_factory=list)
@@ -130,6 +172,8 @@ class ElectricalAssessment(StrictModel):
 
 
 class ChildrenAssessment(StrictModel):
+    """어린이제품 툴이 연령 원문과 실제 용도를 구분해 정리한 결과."""
+
     kind: Literal["children"] = "children"
     target_age_raw: str | None = None
     intended_for_children: bool | None = None
@@ -140,6 +184,8 @@ class ChildrenAssessment(StrictModel):
 
 
 class AdvertisingPhrase(StrictModel):
+    """표시광고 툴이 탐지한 개별 위험 문구."""
+
     text: str
     risk_type: str
     risk_level: RiskLevel
@@ -148,6 +194,8 @@ class AdvertisingPhrase(StrictModel):
 
 
 class AdvertisingAssessment(StrictModel):
+    """검사한 문구 전체와 탐지 결과를 포함한 표시광고 툴 결과."""
+
     kind: Literal["advertising"] = "advertising"
     reviewed_phrases: list[str] = Field(default_factory=list)
     detected_phrases: list[AdvertisingPhrase] = Field(default_factory=list)
@@ -155,6 +203,7 @@ class AdvertisingAssessment(StrictModel):
     legal_sources: list[LegalSource] = Field(default_factory=list)
 
 
+# kind 필드를 discriminator로 사용해 JSON을 올바른 전용 모델로 복원한다.
 ToolAssessment = Annotated[
     CustomsAssessment
     | RadioAssessment
@@ -166,7 +215,10 @@ ToolAssessment = Annotated[
 ]
 
 
+# 툴 공통 결과 ---------------------------------------------------------------
 class RegulatoryFinding(StrictModel):
+    """서로 다른 규제 툴을 종합·검증하기 위한 공통 판단 단위."""
+
     finding_id: str = Field(default_factory=lambda: str(uuid4()))
     tool_name: ToolName
     subject: str
@@ -182,22 +234,36 @@ class RegulatoryFinding(StrictModel):
 
 
 class ToolResult(StrictModel):
+    """규제 툴 한 번의 선택 여부, 실행 상태, 상세 결과와 원본 응답."""
+
     tool_name: ToolName
     attempt: int = Field(default=1, ge=1)
     status: ToolStatus
     selected: bool
     selection_reason: str
     query: dict[str, Any] = Field(default_factory=dict)
-    result: ToolAssessment | None = None
-    findings: list[RegulatoryFinding] = Field(default_factory=list)
+    result: ToolAssessment | None = Field(
+        default=None,
+        description="6개 툴 중 하나가 반환한 도메인별 정규화 결과",
+    )
+    findings: list[RegulatoryFinding] = Field(
+        default_factory=list,
+        description="종합기와 검증기가 공통으로 처리할 규제 판단",
+    )
     required_actions: list[str] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
-    raw_response: dict[str, Any] | list[Any] | str | None = None
+    raw_response: dict[str, Any] | list[Any] | str | None = Field(
+        default=None,
+        description="관세청·식약처·법제처 등 외부 API가 반환한 가공 전 응답",
+    )
     error: str | None = None
     executed_at: datetime = Field(default_factory=utc_now)
 
 
+# 종합 단계 ------------------------------------------------------------------
 class FollowUpQuestion(StrictModel):
+    """규제 판단에 정보가 부족할 때 사용자에게 요청할 추가 정보."""
+
     question_id: str = Field(default_factory=lambda: str(uuid4()))
     question: str
     reason: str
@@ -206,6 +272,8 @@ class FollowUpQuestion(StrictModel):
 
 
 class TraceEvent(StrictModel):
+    """툴 선택부터 재검사까지 파이프라인 동작을 시간순으로 남기는 로그."""
+
     sequence: int
     stage: str
     component: str
@@ -216,6 +284,8 @@ class TraceEvent(StrictModel):
 
 
 class DraftAssessment(StrictModel):
+    """6개 툴 결과를 합쳐 검증 에이전트에 전달하는 검증 전 초안."""
+
     assessment_id: str = Field(default_factory=lambda: str(uuid4()))
     product: Product
     selected_tools: list[ToolName]
@@ -230,7 +300,10 @@ class DraftAssessment(StrictModel):
     generated_at: datetime = Field(default_factory=utc_now)
 
 
+# 검증 단계 ------------------------------------------------------------------
 class VerificationIssueType(StrEnum):
+    """검증 에이전트가 보고할 수 있는 문제 유형."""
+
     MISSING_TOOL = "missing_tool"
     TOOL_FAILURE = "tool_failure"
     MISSING_EVIDENCE = "missing_evidence"
@@ -241,6 +314,8 @@ class VerificationIssueType(StrEnum):
 
 
 class VerificationIssue(StrictModel):
+    """검증 과정에서 발견한 하나의 문제와 권장 조치."""
+
     issue_id: str = Field(default_factory=lambda: str(uuid4()))
     severity: str
     issue_type: VerificationIssueType
@@ -250,6 +325,8 @@ class VerificationIssue(StrictModel):
 
 
 class VerificationStatus(StrEnum):
+    """검증 에이전트가 다음 파이프라인 동작을 결정하는 상태."""
+
     APPROVED = "approved"
     APPROVED_WITH_WARNINGS = "approved_with_warnings"
     REVISION_REQUIRED = "revision_required"
@@ -257,6 +334,8 @@ class VerificationStatus(StrEnum):
 
 
 class VerificationResult(StrictModel):
+    """검증 이슈, 추가 툴, 사용자 질문을 포함한 검증 에이전트 출력."""
+
     status: VerificationStatus
     review_summary: str | None = None
     issues: list[VerificationIssue] = Field(default_factory=list)
@@ -267,6 +346,8 @@ class VerificationResult(StrictModel):
 
 
 class RemediationRecord(StrictModel):
+    """revision_required 이후 실행한 한 번의 자동 재검사 기록."""
+
     iteration: int = Field(ge=1)
     trigger_status: VerificationStatus
     tools: list[ToolName]
@@ -288,13 +369,18 @@ class PipelineState(StrictModel):
     remediation_history: list[RemediationRecord] = Field(default_factory=list)
 
 
+# 최종 출력 ------------------------------------------------------------------
 class FinalVerificationStatus(StrEnum):
+    """세부 검증 상태를 사용자용으로 단순화한 최종 상태."""
+
     VERIFIED = "verified"
     VERIFIED_WITH_WARNINGS = "verified_with_warnings"
     INCOMPLETE = "incomplete"
 
 
 class FinalAssessment(StrictModel):
+    """최신 툴 결과, 검증 및 전체 이력을 포함한 파이프라인 최종 출력."""
+
     assessment_id: str
     schema_version: str = "0.3.0"
     product: Product
@@ -303,14 +389,20 @@ class FinalAssessment(StrictModel):
     summary: str
     selected_tools: list[ToolName]
     tool_results: list[ToolResult]
-    tool_result_history: list[ToolResult] = Field(default_factory=list)
+    tool_result_history: list[ToolResult] = Field(
+        default_factory=list,
+        description="최초 실행과 모든 재검사를 포함한 툴 결과 이력",
+    )
     findings: list[RegulatoryFinding]
     required_actions: list[str] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
     follow_up_questions: list[FollowUpQuestion] = Field(default_factory=list)
     verification: VerificationResult
     verification_rounds: int = Field(default=1, ge=1)
-    remediation_history: list[RemediationRecord] = Field(default_factory=list)
+    remediation_history: list[RemediationRecord] = Field(
+        default_factory=list,
+        description="검증 에이전트 요청으로 수행된 자동 추가 조치 이력",
+    )
     trace: list[TraceEvent] = Field(default_factory=list)
     generated_at: datetime = Field(default_factory=utc_now)
 

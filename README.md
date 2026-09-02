@@ -90,6 +90,18 @@ python -m unittest discover -s tests -v
 - `palgijeone/pipeline.py`: 전체 오케스트레이션 및 실행 추적
 - `palgijeone/cli.py`: 흐름 확인용 CLI
 
+## 처음 코드를 읽는 순서
+
+1. `schemas.py`에서 `Product → ToolResult → DraftAssessment → FinalAssessment` 데이터 흐름 확인
+2. `selector.py`에서 상품 신호가 6개 툴 선택으로 변환되는 규칙 확인
+3. `regulatory_tools.py`에서 툴별 상세 `result`와 공통 `findings` 생성 과정 확인
+4. `aggregator.py`와 `verifier.py`에서 종합·검증 조건 확인
+5. `pipeline.py`에서 `revision_required` 이후 선택적 재검사 루프 확인
+6. `llm_agents.py`에서 규칙 기반 컴포넌트를 Gemini 에이전트로 교체하는 방식 확인
+
+주석은 코드가 무엇을 하는지 반복하기보다 스키마 분리 이유, 감사 가능성, 재검사 종료 조건처럼
+처음 보는 사람이 의도를 파악하기 어려운 지점을 중심으로 작성했습니다.
+
 ## 실제 API 연동 지점
 
 각 툴은 동일한 `RegulatoryTool` 인터페이스를 구현합니다. Mock 로직 대신 API 클라이언트를

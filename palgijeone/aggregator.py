@@ -1,3 +1,5 @@
+"""서로 다른 규제 툴 결과를 하나의 DraftAssessment로 합친다."""
+
 from .schemas import (
     Determination,
     DraftAssessment,
@@ -15,6 +17,8 @@ class ResultAggregationTool:
     """6개 툴 결과를 검증 에이전트 입력 스키마로 정규화한다."""
 
     def run(self, product: Product, tool_results: list[ToolResult]) -> DraftAssessment:
+        """공통 finding, 필요 조치와 누락 정보를 중복 제거해 종합한다."""
+
         findings = [finding for result in tool_results for finding in result.findings]
         selected_tools = [result.tool_name for result in tool_results if result.selected]
         actions = list(dict.fromkeys(action for result in tool_results for action in result.required_actions))
@@ -31,6 +35,7 @@ class ResultAggregationTool:
             for item in missing
         ]
 
+        # 전체 상태는 가장 보수적인 결과를 우선한다: high risk > 정보 부족 > 조치 필요.
         if any(f.risk_level == RiskLevel.HIGH and f.determination != Determination.NOT_REQUIRED for f in findings):
             overall = OverallStatus.HIGH_RISK
         elif missing or any(f.determination == Determination.INSUFFICIENT_INFORMATION for f in findings):
@@ -60,4 +65,3 @@ class ResultAggregationTool:
             follow_up_questions=questions,
             assumptions=["현재 규제 근거와 API 응답은 전체 흐름 확인을 위한 Mock 데이터임"],
         )
-

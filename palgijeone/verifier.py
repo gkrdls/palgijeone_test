@@ -1,3 +1,5 @@
+"""종합 결과의 구조적 불변 조건을 검사하고 최종 결과를 만드는 검증 에이전트."""
+
 from collections import defaultdict
 
 from .schemas import (
@@ -22,10 +24,13 @@ class VerificationAgent:
         self.selector = selector or ToolSelector()
 
     def verify(self, draft: DraftAssessment) -> VerificationResult:
+        """툴 누락·실패, 근거 누락, 모순과 핵심 상품 정보 부족을 검사한다."""
+
         issues: list[VerificationIssue] = []
         expected_names = set(ToolName)
         actual_names = {result.tool_name for result in draft.tool_results}
 
+        # 6개 중 제외된 툴도 not_applicable로 존재해야 전체 검토 여부를 감사할 수 있다.
         for missing_tool in sorted(expected_names - actual_names, key=lambda item: item.value):
             issues.append(
                 VerificationIssue(
@@ -36,6 +41,7 @@ class VerificationAgent:
                 )
             )
 
+        # 안전 규칙으로 툴 선택을 다시 계산해 분석 에이전트의 누락을 독립적으로 확인한다.
         expected_selection = self.selector.select(draft.product)
         additional_tools: list[ToolName] = []
         by_name = {result.tool_name: result for result in draft.tool_results}
@@ -63,6 +69,7 @@ class VerificationAgent:
                     )
                 )
 
+        # 확정 또는 가능성 판단에는 최소 한 개 이상의 법적 근거가 필요하다.
         for finding in draft.findings:
             needs_evidence = finding.determination in {
                 Determination.REQUIRED,
@@ -131,6 +138,8 @@ class VerificationAgent:
         )
 
     def finalize(self, draft: DraftAssessment, verification: VerificationResult) -> FinalAssessment:
+        """세부 검증 상태를 사용자용 최종 상태로 변환해 결과를 생성한다."""
+
         if verification.status == VerificationStatus.APPROVED:
             final_status = FinalVerificationStatus.VERIFIED
         elif verification.status == VerificationStatus.APPROVED_WITH_WARNINGS:

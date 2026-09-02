@@ -1,3 +1,5 @@
+"""상품 입력부터 검증·재검사·최종 출력까지 연결하는 오케스트레이터."""
+
 from __future__ import annotations
 
 from .aggregator import ResultAggregationTool
@@ -9,6 +11,13 @@ from .verifier import VerificationAgent
 
 
 class CompliancePipeline:
+    """분석 에이전트, 6개 규제 툴, 종합기와 검증 에이전트를 실행한다.
+
+    `revision_required`이면 검증 결과가 지목한 툴만 다시 실행한다. 재검사 횟수는
+    `max_remediation_attempts`로 제한해 LLM 판단이나 외부 API 오류로 인한 무한 루프를
+    방지한다. `user_input_required`는 자동으로 해결할 수 없으므로 즉시 반환한다.
+    """
+
     def __init__(
         self,
         tools: dict[ToolName, RegulatoryTool] | None = None,
@@ -26,6 +35,8 @@ class CompliancePipeline:
         self.max_remediation_attempts = max_remediation_attempts
 
     def run(self, product: Product) -> FinalAssessment:
+        """상품 하나를 입력받아 감사 가능한 실행 이력과 최종 진단을 반환한다."""
+
         trace: list[TraceEvent] = []
 
         def record(stage: str, component: str, action: str, status: str, detail: str) -> None:
@@ -42,6 +53,7 @@ class CompliancePipeline:
 
         record("input", "product_parser", "load_product", "completed", product.product_name or product.product_id)
 
+        # 1) 파싱된 상품 신호를 바탕으로 실행할 규제 툴을 선택한다.
         decisions = self.selector.select(product)
         selected = [name.value for name, decision in decisions.items() if decision.selected]
         selector_name = getattr(self.selector, "agent_name", "rules")
@@ -53,6 +65,7 @@ class CompliancePipeline:
             f"agent={selector_name}; selected={', '.join(selected)}",
         )
 
+        # 2) 여섯 툴을 모두 순회한다. 선택하지 않은 툴도 not_applicable로 기록한다.
         tool_results: list[ToolResult] = []
         for name in ToolName:
             tool = self.tools[name]
@@ -79,6 +92,8 @@ class CompliancePipeline:
                 f"attempt=1; findings={len(result.findings)}",
             )
 
+        # 최신 결과와 전체 시도 이력을 분리한다. 재검사 시 최신 결과만 교체되고
+        # tool_result_history에는 실패를 포함한 이전 결과가 계속 남는다.
         state = PipelineState(
             product=product,
             max_remediation_attempts=self.max_remediation_attempts,
@@ -86,6 +101,7 @@ class CompliancePipeline:
             tool_result_history=list(tool_results),
         )
 
+        # 3) 종합 → 검증 → 필요한 툴 재호출을 승인 또는 중단 상태까지 반복한다.
         while True:
             state.draft = self.aggregator.run(product, state.tool_results)
             record(
@@ -108,6 +124,7 @@ class CompliancePipeline:
                 f"issues={len(state.verification.issues)}",
             )
 
+            # 승인, 경고 승인, 사용자 입력 필요 상태는 자동 재검사 대상이 아니다.
             if state.verification.status != VerificationStatus.REVISION_REQUIRED:
                 break
 
@@ -121,6 +138,7 @@ class CompliancePipeline:
                 )
                 break
 
+            # 검증 결과에서 구조적으로 재실행할 수 있는 툴만 추출한다.
             retry_tools = self._retry_tools(state.draft, state.verification)
             if not retry_tools:
                 record(
@@ -142,6 +160,7 @@ class CompliancePipeline:
                 f"attempt={attempt}; tools={', '.join(name.value for name in retry_tools)}",
             )
 
+            # 재실행한 툴 결과만 교체하고 다른 툴의 최신 결과는 유지한다.
             current = {result.tool_name: result for result in state.tool_results}
             statuses: dict[ToolName, ToolStatus] = {}
             for name in retry_tools:
@@ -185,6 +204,7 @@ class CompliancePipeline:
 
         assert state.draft is not None
         assert state.verification is not None
+        # 4) 종료 시점의 최신 초안과 검증 결과에 전체 재검사 이력을 합친다.
         final = self.verifier.finalize(state.draft, state.verification)
         final.tool_result_history = state.tool_result_history
         final.verification_rounds = state.verification_round
@@ -201,6 +221,8 @@ class CompliancePipeline:
 
     @staticmethod
     def _retry_tools(draft, verification) -> list[ToolName]:
+        """추가 요청, 툴 실패, critical finding을 재실행 대상 목록으로 합친다."""
+
         requested = list(verification.additional_tools_required)
         requested.extend(
             result.tool_name
@@ -222,6 +244,8 @@ class CompliancePipeline:
 
     @staticmethod
     def _retry_reason(verification) -> str:
+        """재호출된 ToolResult에 남길 사람이 읽을 수 있는 사유를 만든다."""
+
         critical_descriptions = [
             issue.description for issue in verification.issues if issue.severity == "critical"
         ]

@@ -1,3 +1,5 @@
+"""규제 신호와 누락 정보 분기를 확인하기 위한 결정론적 테스트 상품."""
+
 from .schemas import Attribute, Product
 
 
@@ -89,9 +91,10 @@ SAMPLE_PRODUCTS: dict[str, Product] = {
 
 
 def get_sample_product(product_id: str) -> Product:
+    """공유 테스트 데이터가 변경되지 않도록 선택한 상품의 깊은 복사본을 반환한다."""
+
     try:
         return SAMPLE_PRODUCTS[product_id].model_copy(deep=True)
     except KeyError as exc:
         choices = ", ".join(SAMPLE_PRODUCTS)
         raise KeyError(f"알 수 없는 상품 ID: {product_id}. 선택 가능: {choices}") from exc
-
