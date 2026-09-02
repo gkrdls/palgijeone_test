@@ -11,7 +11,7 @@ from typing import Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, Field
 
-from .config import load_project_env
+from .config import DEFAULT_GEMINI_MODEL, load_project_env
 from .schemas import (
     DraftAssessment,
     ToolName,
@@ -42,7 +42,7 @@ class GeminiStructuredClient:
     def __init__(
         self,
         api_key: str | None = None,
-        model_name: str = "gemini-2.5-flash-lite",
+        model_name: str = DEFAULT_GEMINI_MODEL,
     ) -> None:
         load_project_env()
         resolved_key = (api_key or os.getenv("GEMINI_API_KEY") or "").strip()

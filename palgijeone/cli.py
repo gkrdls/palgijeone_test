@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from .config import DEFAULT_GEMINI_MODEL
 from .pipeline import CompliancePipeline
 from .sample_products import SAMPLE_PRODUCTS, get_sample_product
 
@@ -58,7 +59,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default="gemini-2.5-flash-lite",
+        default=DEFAULT_GEMINI_MODEL,
         help="LLM 모드에서 사용할 Gemini 모델",
     )
     args = parser.parse_args()

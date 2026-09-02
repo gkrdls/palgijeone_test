@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 PROJECT_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 
 def load_project_env() -> None:

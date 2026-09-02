@@ -6,7 +6,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
-from palgijeone.config import load_project_env
+from palgijeone.config import DEFAULT_GEMINI_MODEL, load_project_env
 from palgijeone.llm_agents import GeminiStructuredClient
 
 
@@ -59,6 +59,34 @@ class EnvironmentConfigTest(unittest.TestCase):
             constructor.assert_called_with(api_key="local-test-key")
             GeminiStructuredClient(api_key="explicit-test-key")
             constructor.assert_called_with(api_key="explicit-test-key")
+
+    def test_client_default_model_and_explicit_override(self):
+        google = ModuleType("google")
+        google.genai = SimpleNamespace(Client=Mock())
+        with patch.dict(sys.modules, {"google": google}):
+            self.assertEqual(DEFAULT_GEMINI_MODEL, "gemini-3.5-flash-lite")
+            self.assertEqual(GeminiStructuredClient().model_name, DEFAULT_GEMINI_MODEL)
+            self.assertEqual(
+                GeminiStructuredClient(model_name="custom-model").model_name,
+                "custom-model",
+            )
+
+    def test_cli_default_model_and_explicit_override(self):
+        from palgijeone.cli import main
+
+        for model in (None, "custom-model"):
+            with self.subTest(model=model):
+                args = ["palgijeone", "--agent-mode", "llm"]
+                if model:
+                    args.extend(["--model", model])
+                with (
+                    patch.object(sys, "argv", args),
+                    patch("palgijeone.llm_agents.GeminiStructuredClient") as client,
+                    patch("palgijeone.cli.CompliancePipeline"),
+                    patch("palgijeone.cli.print_flow"),
+                ):
+                    main()
+                    client.assert_called_once_with(model_name=model or DEFAULT_GEMINI_MODEL)
 
 
 if __name__ == "__main__":

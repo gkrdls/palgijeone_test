@@ -80,7 +80,16 @@ python -m palgijeone.cli --product wireless_rc_helicopter --agent-mode llm
 LLM 모드는 최초 분석과 검증에 두 번, 재검사마다 추가 검증에 한 번씩 호출합니다.
 기본 재검사 한도 2회일 때 정상 응답 기준 최대 4회입니다. 분석 에이전트가 6개 규제 툴의 선택 여부와 이유를
 구조화 응답으로 만들고, 규칙 기반 툴 실행 후 검증 에이전트가 결과의 누락·모순·근거를 다시
-검토합니다. `--model`로 모델을 바꿀 수 있으며 기본값은 `gemini-2.5-flash-lite`입니다.
+검토합니다. `--model`로 모델을 바꿀 수 있으며 기본값은 `gemini-3.5-flash-lite`입니다.
+
+기존 `gemini-2.5-flash-lite`에서 신규 사용자 접근 제한으로 404가 발생하면
+`--model gemini-3.5-flash-lite`를 지정하세요. Interactions API는 그대로 사용합니다.
+
+Git Bash에서 저장소의 가상환경으로 실행하는 예시:
+
+```bash
+./.venv/Scripts/python.exe -X utf8 -m palgijeone.cli --product wireless_rc_helicopter --agent-mode llm --model gemini-3.5-flash-lite
+```
 
 ```powershell
 python -m palgijeone.cli --product cosmetic_serum --agent-mode llm --json
